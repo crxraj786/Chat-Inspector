@@ -16,7 +16,9 @@
     const senderName = textOf(node, ['[data-sender-name]', '[data-testid*="sender"]', 'h3', 'strong']) || (node.getAttribute('aria-label') || '').split(':')[0] || 'Unknown sender';
     const direction = U.normalizeDirection(node.getAttribute('data-direction') || node.getAttribute('aria-label') || node.className);
     const sourceTimestamp = U.parseTimestamp(node.getAttribute('data-timestamp') || node.querySelector('time')?.getAttribute('datetime') || node.querySelector('time')?.textContent);
-    return { accountRef: 'local-session', conversationRef: location.pathname, conversationName, senderRef: senderName.toLowerCase(), senderName, direction, messageText, messageType: U.detectMessageType(node), sourceTimestamp, capturedAt: new Date().toISOString(), attachments: [], source: 'messenger-dom' };
+    const attachments = [...node.querySelectorAll('img,video,audio,a[href]')].map((item) => ({ type: item.tagName.toLowerCase(), name: U.normalize(item.getAttribute('aria-label') || item.getAttribute('alt') || item.textContent).slice(0, 200), url: item.tagName.toLowerCase() === 'a' ? item.getAttribute('href')?.slice(0, 500) : undefined })).filter((item) => item.name || item.url).slice(0, 20);
+    const deleted = /unsent|deleted|removed|हटा दिया|डिलीट/i.test(`${node.getAttribute('aria-label') || ''} ${node.textContent}`) ? 'source_deleted' : 'active';
+    return { accountRef: 'local-session', conversationRef: location.pathname, conversationName, senderRef: senderName.toLowerCase(), senderName, direction, messageText, messageType: U.detectMessageType(node), sourceTimestamp, capturedAt: new Date().toISOString(), attachments, deletedStatus: deleted, source: 'messenger-dom' };
   };
   const emit = async (node) => {
     if (state.seenNodes.has(node) || !state.enabled) return;
