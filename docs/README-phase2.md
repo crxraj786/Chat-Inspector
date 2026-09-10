@@ -10,7 +10,9 @@ npm start
 
 The API listens on `PORT` (default `3000`). It exposes `/v1/health`, authenticated `/v1/messages/batch`, `/v1/messages`, `/v1/conversations`, `/v1/stats`, `/v1/export?format=json|csv|txt`, and `/v1/analysis`.
 
-This development adapter uses in-memory storage so it can be tested immediately. For Railway production, run `server/schema.sql` against PostgreSQL and replace the in-memory repository with parameterized PostgreSQL queries before enabling production ingestion. Never use a Telegram token or API key in client-side code.
+When `DATABASE_URL` is present, the API uses the PostgreSQL repository with parameterized queries and the unique `messages.fingerprint` constraint. Without it, the in-memory adapter remains available for local tests only. For Railway production, run `server/schema.sql` against PostgreSQL. Never use a Telegram token or API key in client-side code.
+
+Set `DEFAULT_OWNER_ID` to enable owner-scoped access; clients must send the matching `X-Owner-Id` header. All authenticated routes are rate-limited (default 120 requests per IP per minute; configure with `RATE_LIMIT_PER_MINUTE`).
 
 ## Dashboard
 
