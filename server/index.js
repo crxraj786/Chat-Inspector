@@ -1,0 +1,33 @@
+import http from 'node:http';
+import crypto from 'node:crypto';
+import { startTelegramPolling } from './telegram.js';
+
+const PORT = Number(process.env.PORT || 3000);
+const API_KEY = process.env.CHAT_INSPECTOR_API_KEY || '';
+const MAX_BATCH = 100;
+const messages = new Map();
+const conversations = new Map();
+
+const json = (res, status, body) => { const payload = JSON.stringify(body); res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(payload); };
+const readBody = (req) => new Promise((resolve, reject) => { let data = ''; req.on('data', (chunk) => { data += chunk; if (data.length > 2_000_000) reject(new Error('payload too large')); }); req.on('end', () => { try { resolve(JSON.parse(data || '{}')); } catch { reject(new Error('invalid json')); } }); req.on('error', reject); });
+const authorized = (req) => !API_KEY || req.headers.authorization === `Bearer ${API_KEY}`;
+const validRecord = (r) => r && typeof r === 'object' && typeof r.fingerprint === 'string' && r.fingerprint.length <= 100 && typeof r.messageText === 'string' && r.messageText.length <= 10000 && ['incoming', 'outgoing', 'unknown'].includes(r.direction) && typeof r.conversationRef === 'string' && r.conversationRef.length <= 500;
+const audit = (event, meta = {}) => console.info(JSON.stringify({ event, at: new Date().toISOString(), ...meta }));
+const listMessages = ({ q, conversation, direction, from, to, limit = 100 }) => [...messages.values()].filter((m) => (!q || `${m.messageText} ${m.senderName} ${m.conversationName}`.toLowerCase().includes(q.toLowerCase())) && (!conversation || m.conversationRef === conversation) && (!direction || m.direction === direction) && (!from || m.capturedAt >= from) && (!to || m.capturedAt <= to)).sort((a, b) => b.capturedAt.localeCompare(a.capturedAt)).slice(0, Math.min(Number(limit) || 100, 500));
+const analysis = (items) => { const text = items.map((m) => m.messageText).join(' ').toLowerCase(); const positive = (text.match(/good|great|thanks|love|happy|अच्छा|धन्यवाद|खुश/g) || []).length; const negative = (text.match(/bad|angry|sad|problem|hate|बुरा|गुस्सा|परेशान/g) || []).length; const sentiment = positive > negative ? 'positive' : negative > positive ? 'negative' : 'neutral'; const topic = /money|पैसे|payment|भुगतान/.test(text) ? 'finance' : /work|काम|office|project/.test(text) ? 'work' : /family|घर|भाई|बहन/.test(text) ? 'family' : 'general'; return { summary: `${items.length} backed-up messages analyzed. Dominant topic: ${topic}.`, sentiment, topic, importantMessages: items.filter((m) => /urgent|important|जरूरी|तुरंत/i.test(m.messageText)).slice(0, 10).map((m) => m.fingerprint) }; };
+const csv = (items) => ['conversation,sender,direction,message,capturedAt,fingerprint', ...items.map((m) => [m.conversationName, m.senderName, m.direction, m.messageText, m.capturedAt, m.fingerprint].map((v) => `"${String(v || '').replaceAll('"', '""')}"`).join(','))].join('\n');
+const route = async (req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  if (req.method === 'GET' && url.pathname === '/v1/health') return json(res, 200, { ok: true, service: 'chat-inspector-api', messages: messages.size });
+  if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+  if (req.method === 'POST' && url.pathname === '/v1/messages/batch') {
+    try { const body = await readBody(req); if (!Array.isArray(body.messages) || body.messages.length > MAX_BATCH) return json(res, 400, { error: 'messages must be an array of at most 100 records' }); const result = { accepted: [], duplicates: [], rejected: [] }; for (const record of body.messages) { if (!validRecord(record)) { result.rejected.push({ fingerprint: record?.fingerprint || null, reason: 'invalid_record' }); continue; } if (messages.has(record.fingerprint)) { result.duplicates.push(record.fingerprint); continue; } const saved = { ...record, capturedAt: record.capturedAt || new Date().toISOString(), savedAt: new Date().toISOString(), deletedStatus: 'active' }; messages.set(record.fingerprint, saved); conversations.set(record.conversationRef, { conversationRef: record.conversationRef, conversationName: record.conversationName || 'Unknown conversation', lastMessageAt: saved.capturedAt }); result.accepted.push(record.fingerprint); } audit('batch_processed', { accepted: result.accepted.length, duplicates: result.duplicates.length, rejected: result.rejected.length }); return json(res, 200, result); } catch (error) { return json(res, 400, { error: error.message }); }
+  }
+  if (req.method === 'GET' && url.pathname === '/v1/messages') return json(res, 200, { messages: listMessages(Object.fromEntries(url.searchParams)), total: messages.size });
+  if (req.method === 'GET' && url.pathname === '/v1/conversations') return json(res, 200, { conversations: [...conversations.values()].sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt)) });
+  if (req.method === 'GET' && url.pathname === '/v1/stats') { const all = [...messages.values()]; return json(res, 200, { totalMessages: all.length, totalConversations: conversations.size, incoming: all.filter((m) => m.direction === 'incoming').length, outgoing: all.filter((m) => m.direction === 'outgoing').length, today: all.filter((m) => m.capturedAt.slice(0, 10) === new Date().toISOString().slice(0, 10)).length }); }
+  if (req.method === 'GET' && url.pathname === '/v1/export') { const items = listMessages(Object.fromEntries(url.searchParams)); const format = url.searchParams.get('format') || 'json'; if (format === 'csv') { res.writeHead(200, { 'content-type': 'text/csv', 'content-disposition': 'attachment; filename="chat-inspector-export.csv"' }); return res.end(csv(items)); } if (format === 'txt') { res.writeHead(200, { 'content-type': 'text/plain', 'content-disposition': 'attachment; filename="chat-inspector-export.txt"' }); return res.end(items.map((m) => `[${m.capturedAt}] ${m.conversationName} / ${m.senderName}: ${m.messageText}`).join('\n')); } return json(res, 200, { exportedAt: new Date().toISOString(), messages: items }); }
+  if (req.method === 'GET' && url.pathname === '/v1/analysis') return json(res, 200, analysis(listMessages(Object.fromEntries(url.searchParams))));
+  return json(res, 404, { error: 'not_found' });
+};
+http.createServer((req, res) => route(req, res).catch((error) => { audit('request_failed', { error: error.message }); json(res, 500, { error: 'internal_error' }); })).listen(PORT, '0.0.0.0', () => { console.log(`Chat-Inspector API listening on ${PORT}`); startTelegramPolling(() => ({ messages: [...messages.values()], conversations: [...conversations.values()] })); });

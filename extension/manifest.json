@@ -3,7 +3,7 @@
   "name": "Chat-Inspector Capture Prototype",
   "version": "0.1.0",
   "description": "Detects visible Messenger messages for an authorized local backup queue. Never sends credentials or auto-replies.",
-  "permissions": ["storage"],
+  "permissions": ["storage", "alarms"],
   "host_permissions": ["https://www.facebook.com/messages/*", "https://www.messenger.com/*"],
   "background": {"service_worker": "background/service-worker.js", "type": "module"},
   "action": {"default_title": "Chat-Inspector", "default_popup": "popup/popup.html"},

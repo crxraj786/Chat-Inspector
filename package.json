@@ -5,6 +5,7 @@
   "description": "Privacy-first authorized Messenger backup detection prototype",
   "type": "module",
   "scripts": {
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "start": "node server/index.js"
   }
 }
