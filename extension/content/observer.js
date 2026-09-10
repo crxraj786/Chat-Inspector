@@ -33,6 +33,8 @@
     nodes.forEach(emit);
   };
   chrome.runtime.onMessage.addListener((message) => { if (message?.type === 'SET_CAPTURE') state.enabled = Boolean(message.enabled); });
+  chrome.storage.local.get({ captureEnabled: true }).then((data) => { state.enabled = data.captureEnabled !== false; });
+  chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' && changes.captureEnabled) state.enabled = changes.captureEnabled.newValue !== false; });
   scan();
   state.observer = new MutationObserver((mutations) => mutations.forEach((mutation) => mutation.addedNodes.forEach((node) => { if (node.nodeType === Node.ELEMENT_NODE) { emit(node); scan(node); } })));
   state.observer.observe(document.body, { childList: true, subtree: true });
