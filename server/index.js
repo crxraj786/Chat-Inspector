@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { createRepository } from './repository.js';
-import { startTelegramPolling } from './telegram.js';
+import { startTelegramPolling, notifyTelegram } from './telegram.js';
 import { login, logout, sessionOwner } from './auth.js';
 
 const PORT = Number(process.env.PORT || 3000);
